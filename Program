@@ -1,0 +1,209 @@
+#define BLYNK_TEMPLATE_ID "TMPL34TcXBJxT"
+#define BLYNK_TEMPLATE_NAME "Indicators control over mobile phones"
+#define BLYNK_AUTH_TOKEN "4RLq1CpMgoeQg0UT7GENoPkCTWkswHnU"
+
+#define BLYNK_PRINT Serial
+
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
+
+// LED Pins
+#define LEFT_LED_PIN       25
+#define RIGHT_LED_PIN      26
+
+// Button Pins
+#define LEFT_BUTTON_PIN    18
+#define RIGHT_BUTTON_PIN   19
+#define HAZARD_BUTTON_PIN  21
+
+bool leftBlinking = false;
+bool rightBlinking = false;
+bool hazardBlinking = false;
+
+unsigned long lastLeftBlinkTime = 0;
+unsigned long lastRightBlinkTime = 0;
+
+unsigned long leftButtonPressStart = 0;
+unsigned long rightButtonPressStart = 0;
+unsigned long hazardButtonPressStart = 0;
+
+char ssid[] = "Wokwi-GUEST";
+char pass[] = "";
+
+// Blynk Virtual Pins
+#define VPIN_LEFT     V0
+#define VPIN_RIGHT    V1
+#define VPIN_HAZARD   V2
+
+void updateLed(bool on, uint8_t pin) {
+  digitalWrite(pin, on ? HIGH : LOW);
+}
+
+void printStatus() {
+  Serial.print("Status: Left=");
+  Serial.print(leftBlinking ? "ON" : "OFF");
+  Serial.print(", Right=");
+  Serial.print(rightBlinking ? "ON" : "OFF");
+  Serial.print(", Hazard=");
+  Serial.println(hazardBlinking ? "ON" : "OFF");
+}
+
+// BLYNK Handlers
+BLYNK_WRITE(VPIN_LEFT) {
+  int val = param.asInt();
+  if (val == 1) {
+    handleLeftButton();
+  }
+}
+
+BLYNK_WRITE(VPIN_RIGHT) {
+  int val = param.asInt();
+  if (val == 1) {
+    handleRightButton();
+  }
+}
+
+BLYNK_WRITE(VPIN_HAZARD) {
+  int val = param.asInt();
+  if (val == 1) {
+    handleHazardButton();
+  }
+}
+
+void handleLeftButton() {
+  if (!hazardBlinking) {
+    if (!leftBlinking && !rightBlinking) {
+      leftBlinking = true;
+      Serial.println("Left ON");
+    } else if (leftBlinking) {
+      leftBlinking = false;
+      Serial.println("Left OFF");
+    } else if (rightBlinking) {
+      rightBlinking = false;
+      leftBlinking = true;
+      Serial.println("Switched to Left");
+    }
+    printStatus();
+  }
+}
+
+void handleRightButton() {
+  if (!hazardBlinking) {
+    if (!rightBlinking && !leftBlinking) {
+      rightBlinking = true;
+      Serial.println("Right ON");
+    } else if (rightBlinking) {
+      rightBlinking = false;
+      Serial.println("Right OFF");
+    } else if (leftBlinking) {
+      leftBlinking = false;
+      rightBlinking = true;
+      Serial.println("Switched to Right");
+    }
+    printStatus();
+  }
+}
+
+void handleHazardButton() {
+  hazardBlinking = !hazardBlinking;
+  if (hazardBlinking) {
+    leftBlinking = false;
+    rightBlinking = false;
+    Serial.println("Hazard ON");
+  } else {
+    Serial.println("Hazard OFF");
+  }
+  printStatus();
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(LEFT_LED_PIN, OUTPUT);
+  pinMode(RIGHT_LED_PIN, OUTPUT);
+
+  pinMode(LEFT_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(RIGHT_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(HAZARD_BUTTON_PIN, INPUT_PULLUP);
+
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+  Serial.println("Connected to Blynk...");
+}
+
+void loop() {
+  Blynk.run();
+  unsigned long now = millis();
+
+  // --- Handle Push Buttons ---
+  // Hazard Button
+  if (digitalRead(HAZARD_BUTTON_PIN) == LOW) {
+    if (hazardButtonPressStart == 0) {
+      hazardButtonPressStart = now;
+    } else if (now - hazardButtonPressStart >= 1000) {
+      handleHazardButton();
+      hazardButtonPressStart = 0;
+      delay(200);
+    }
+  } else {
+    hazardButtonPressStart = 0;
+  }
+
+  // Left Button
+  if (!hazardBlinking && digitalRead(LEFT_BUTTON_PIN) == LOW) {
+    if (leftButtonPressStart == 0) {
+      leftButtonPressStart = now;
+    } else if (now - leftButtonPressStart >= 1000) {
+      handleLeftButton();
+      leftButtonPressStart = 0;
+      delay(200);
+    }
+  } else {
+    leftButtonPressStart = 0;
+  }
+
+  // Right Button
+  if (!hazardBlinking && digitalRead(RIGHT_BUTTON_PIN) == LOW) {
+    if (rightButtonPressStart == 0) {
+      rightButtonPressStart = now;
+    } else if (now - rightButtonPressStart >= 1000) {
+      handleRightButton();
+      rightButtonPressStart = 0;
+      delay(200);
+    }
+  } else {
+    rightButtonPressStart = 0;
+  }
+
+  // --- LED Blinking Logic ---
+  static bool leftOn = false;
+  static bool rightOn = false;
+
+  if (hazardBlinking) {
+    if (now - lastLeftBlinkTime >= 300) {
+      lastLeftBlinkTime = now;
+      leftOn = !leftOn;
+      rightOn = leftOn;
+      updateLed(leftOn, LEFT_LED_PIN);
+      updateLed(rightOn, RIGHT_LED_PIN);
+    }
+  } else {
+    if (leftBlinking && now - lastLeftBlinkTime >= 300) {
+      lastLeftBlinkTime = now;
+      leftOn = !leftOn;
+      updateLed(leftOn, LEFT_LED_PIN);
+    } else if (!leftBlinking) {
+      updateLed(false, LEFT_LED_PIN);
+      leftOn = false;
+    }
+
+    if (rightBlinking && now - lastRightBlinkTime >= 300) {
+      lastRightBlinkTime = now;
+      rightOn = !rightOn;
+      updateLed(rightOn, RIGHT_LED_PIN);
+    } else if (!rightBlinking) {
+      updateLed(false, RIGHT_LED_PIN);
+      rightOn = false;
+    }
+  }
+}
